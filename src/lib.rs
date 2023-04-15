@@ -1,13 +1,16 @@
 #![doc = include_str!("../README.md")]
 
+
 #[macro_use]
 extern crate tracing;
 
+mod error;
+
+pub use error::*;
+
 use hyper::header::{HeaderMap, HeaderName, HeaderValue, HOST};
-use hyper::http::header::{InvalidHeaderValue, ToStrError};
-use hyper::http::uri::InvalidUri;
 use hyper::upgrade::OnUpgrade;
-use hyper::{Body, Client, Error, Request, Response, StatusCode};
+use hyper::{Body, Client, Request, Response, StatusCode};
 use lazy_static::lazy_static;
 use std::net::IpAddr;
 use tokio::io::copy_bidirectional;
@@ -32,38 +35,6 @@ lazy_static! {
     ];
 
     static ref X_FORWARDED_FOR: HeaderName = HeaderName::from_static("x-forwarded-for");
-}
-
-#[derive(Debug)]
-pub enum ProxyError {
-    InvalidUri(InvalidUri),
-    HyperError(Error),
-    ForwardHeaderError,
-    UpgradeError(String),
-}
-
-impl From<Error> for ProxyError {
-    fn from(err: Error) -> ProxyError {
-        ProxyError::HyperError(err)
-    }
-}
-
-impl From<InvalidUri> for ProxyError {
-    fn from(err: InvalidUri) -> ProxyError {
-        ProxyError::InvalidUri(err)
-    }
-}
-
-impl From<ToStrError> for ProxyError {
-    fn from(_err: ToStrError) -> ProxyError {
-        ProxyError::ForwardHeaderError
-    }
-}
-
-impl From<InvalidHeaderValue> for ProxyError {
-    fn from(_err: InvalidHeaderValue) -> ProxyError {
-        ProxyError::ForwardHeaderError
-    }
 }
 
 fn remove_hop_headers(headers: &mut HeaderMap) {
@@ -206,7 +177,7 @@ fn create_proxied_request<B>(
     forward_url: &str,
     mut request: Request<B>,
     upgrade_type: Option<&String>,
-) -> Result<Request<B>, ProxyError> {
+) -> HyperReverseProxyResult<Request<B>> {
     info!("Creating proxied request");
 
     let contains_te_trailers_value = request
@@ -283,7 +254,7 @@ pub async fn call<'a, T: hyper::client::connect::Connect + Clone + Send + Sync +
     forward_uri: &str,
     mut request: Request<Body>,
     client: &'a Client<T>,
-) -> Result<Response<Body>, ProxyError> {
+) -> HyperReverseProxyResult<Response<Body>> {
     info!(
         "Received proxy call from {} to {}, client: {}",
         request.uri().to_string(),
@@ -358,7 +329,7 @@ impl<T: hyper::client::connect::Connect + Clone + Send + Sync + 'static> Reverse
         client_ip: IpAddr,
         forward_uri: &str,
         request: Request<Body>,
-    ) -> Result<Response<Body>, ProxyError> {
+    ) -> HyperReverseProxyResult<Response<Body>> {
         call::<T>(client_ip, forward_uri, request, &self.client).await
     }
 }
